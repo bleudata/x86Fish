@@ -58,4 +58,6 @@ mp1_ioctl_find:
 mp1_ioctl_sync:
 	ret
 
+JUMP_TABLE
+.long mp1_ioctl_add, mp1_ioctl_remove, mp1_ioctl_find, mp1_ioctl_sync
 .end
