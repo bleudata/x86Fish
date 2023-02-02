@@ -75,8 +75,8 @@ DONE:
 #        Inputs: unsigned long arg (left)
 #                unsigned long cmd (right)
 #       Outputs: -1 for an error if the cmd value was not 0-3, 0 if succesful 
-#     Registers: %esi -  cmd
-#                %edi - arg
+#     Registers: %ebx -  cmd
+#                %ecx - arg
 #       
 mp1_ioctl:
         
@@ -91,15 +91,15 @@ mp1_ioctl:
         pushl %esi
         pushl %edi
 
-        movl 8(%ebp), %esi # load cmd
-        movl 12(%ebp), %edi # load arg
+        movl 8(%ebp), %ebx # load cmd
+        movl 12(%ebp), %ecx # load arg
 
         # caller save registers before jump, maybe don't need this 
         pushl %eax
         pushl %ecx
         pushl %edx 
-        cmpl  $3, %esi # %esi-3
-        ja ERROR # %esi > 3
+        cmpl  $3, %ebx # %ebx-3
+        ja ERROR # %ebx > 3, index out of range of jump table
 
         jmp *JUMP_TABLE(,%esi, 4)
 ERROR:
@@ -112,18 +112,20 @@ DONE:
         leave
 	ret
 
-# void mp1_rtc_tasklet:
+# void mp1_ioctl_add:
 #
 # Interface: 
 #        Inputs: unsigned long arg
 #       Outputs: 0 if succesful add performed, -1 if error
-#     Registers: 
+#     Registers: %ebx - arg
 mp1_ioctl_add:
         pushl %ebp
         movl  %esp, %ebp
         pushl %ebx
         pushl %esi
         pushl %edi
+
+        movl 8(%ebp), %ebx # load arg
 
 SUCCESS:
         xor %eax, %eax
@@ -142,15 +144,17 @@ DONE:
 # void mp1_ioctl_remove:
 #
 # Interface: 
-#        Inputs: 
+#        Inputs: unsigned long arg
 #       Outputs: 0 if succesful, -1 if not
-#     Registers:        
+#     Registers: %ebx - arg      
 mp1_ioctl_remove:
         pushl %ebp
         movl  %esp, %ebp
         pushl %ebx
         pushl %esi
         pushl %edi
+
+        movl 8(%ebp), %ebx # load arg
 
 SUCCESS:
         xor %eax, %eax
@@ -170,13 +174,16 @@ DONE:
 # Interface: 
 #        Inputs: unsigned long arg
 #       Outputs: 0 is succesful, -1 if error
-#     Registers:        
+#     Registers: %ebx - arg     
 mp1_ioctl_find:
         pushl %ebp
         movl  %esp, %ebp
         pushl %ebx
         pushl %esi
         pushl %edi
+
+        movl 8(%ebp), %ebx # load arg
+
 
 SUCCESS:
         xor %eax, %eax
@@ -206,6 +213,9 @@ mp1_ioctl_sync:
         pushl %ebx
         pushl %esi
         pushl %edi
+
+        movl 8(%ebp), %ebx # load arg
+
 
 SUCCESS:
         xor %eax, %eax
