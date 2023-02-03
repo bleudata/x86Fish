@@ -104,10 +104,12 @@ mp1_ioctl:
 
         cmpl  $3, %ecx # %ecx-3
         ja ERROR_ICTL # %ecx > 3, index out of range of jump table
-        jmp *JUMP_TABLE(,%esi, 4) # jump to cmd specified function
+        jmp *JUMP_TABLE(,%ecx, 4) # jump to cmd specified function
 
 ERROR_ICTL:
+        addl $12, %esp
         movl $-1, %eax 
+
 
 DONE_ICTL:
         popl  %edi
@@ -129,7 +131,8 @@ DONE_ICTL:
 #       Outputs: 0 if succesful add performed, -1 if error
 #     Registers: %ebx - input arg
 #                %ecx - temp storage for computations
-#                %eax - return value, and temp storage
+#                       %cl - char for poke                        
+#                %eax - return value, temp storage, location for poke
 #                %edi - address of new struct
 mp1_ioctl_add:
         pushl %ebp
@@ -144,11 +147,10 @@ mp1_ioctl_add:
         pushl %eax # caller set up for mp1_malloc
         pushl %ecx
         pushl %edx
-        movl STRUCT_SIZE, %ecx # load size to push as argument
-        pushl %ecx
+        pushl $STRUCT_SIZE # load size to push as argument
 
         call mp1_malloc # check %eax return value for error
-        cmp 0, %eax
+        cmp $0, %eax
         je ERROR_ADD # error, malloc returned NULL 
         addl $16, %esp # no error, caller tear down m1_malloc
 
@@ -156,10 +158,10 @@ mp1_ioctl_add:
         pushl %eax # caller set up mp1_copy_from_user
         pushl %ecx
         pushl %edx
-        pushl %eax
+        pushl %ebx
 
         call mp1_copy_from_user
-        cmp 0, %eax # check if return address is null
+        cmpl $0, %eax # check if return address is null
         je TEARDOWN_BEFORE_FREE # error, not all bytes copied
         addl $16, %esp # caller tear down for mp1_copy_from_user
          
@@ -170,8 +172,7 @@ mp1_ioctl_add:
         movl $25, %ecx # ecx = 25
         mulw %cx       # ax = 80*25
         subl $1, %ecx   # ecx = 80*25-1
-        movl LOCATION(%edi), %eax # eax = address of location
-        movl (%eax), %eax # eax = value of location
+        movl LOCATION(%edi), %eax # eax = value of location
         cmpl %ecx, %eax # location - (80*25-1) 
         ja FREE_MEMORY # location out of range error
 
@@ -184,6 +185,22 @@ mp1_ioctl_add:
         movl mp1_list_head, %ecx # ecx = old_head
         movl %ecx, NEXT(%edi) # new_node->next = old_head
         movl %edi, mp1_list_head # head = new_node
+
+        # load registers for poke
+        movl STATUS(%edi), %ecx 
+        compl $0, %ecx # ecx-0
+        je STATUS_OFF
+        movl ON_CHAR(%edi), %ecx
+        movl LOCATION(%edi), %eax
+        call mp1_poke
+        JMP SUCCESS_ADD
+
+
+
+STATUS_OFF:
+        movl OFF_CHAR(%edi), %ecx
+        movl LOCATION(%edi), %eax
+        call mp1_poke
 
 SUCCESS_ADD:
         xor %eax, %eax # retval = 0
