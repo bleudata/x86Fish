@@ -128,9 +128,8 @@ DONE_ICTL:
 #        Inputs: unsigned long arg
 #       Outputs: 0 if succesful add performed, -1 if error
 #     Registers: %ebx - input arg
-#                %ecx - temp storage
-#                %eax - return value
-#                %esi - temp storage
+#                %ecx - temp storage for computations
+#                %eax - return value, and temp storage
 #                %edi - address of new struct
 mp1_ioctl_add:
         pushl %ebp
@@ -169,18 +168,21 @@ mp1_ioctl_add:
         xor %eax, %eax
         movl $80, %eax # eax = 80
         movl $25, %ecx # ecx = 25
-        mulw %ecx       # ax = 80*25
+        mulw %cx       # ax = 80*25
         subl $1, %ecx   # ecx = 80*25-1
-        cmpl %ecx, LOCATION(%edi) # location - (80*25-1) 
+        movl LOCATION(%edi), %eax # eax = address of location
+        movl (%eax), %eax # eax = value of location
+        cmpl %ecx, %eax # location - (80*25-1) 
         ja FREE_MEMORY # location out of range error
 
 
-        movl ON_LENGTH(%edi), %ecx # ecx = &onlength
-        movl (%ecx), COUNTDOWN(%edi) # countdown = onlength 
+        movl ON_LENGTH(%edi), %ecx # ecx = value of onlength
+        movl %ecx, COUNTDOWN(%edi) # countdown = onlength 
         movl $1, STATUS(%edi) # status = 1
 
         # insert structure as new list head
-        movl mp1_list_head, NEXT(%edi) # new_node->next = old_head
+        movl mp1_list_head, %ecx # ecx = old_head
+        movl %ecx, NEXT(%edi) # new_node->next = old_head
         movl %edi, mp1_list_head # head = new_node
 
 SUCCESS_ADD:
@@ -202,7 +204,7 @@ FREE_MEMORY:
 
         call mp1_free
         # caller tear down mp1_free
-        addl $16 %esp
+        addl $16, %esp
         
 ERROR_ADD:
         movl $-1, %eax # retval = -1
