@@ -149,13 +149,12 @@ mp1_ioctl:
         movl 4(%esp), %ebx # load arg
         movl 8(%esp), %ecx # load cmd
 
-        cmpl  $3, %ecx # %ecx-3
-        ja ERROR_ICTL # %ecx > 3, index out of range of jump table
+        cmpl  $3, %ecx 
+        ja ERROR_ICTL # %ecx > 3, out of range of jump table
         jmp *JUMP_TABLE(,%ecx, 4) # jump to cmd specified function
 
 ERROR_ICTL:
         movl $-1, %eax 
-
 	ret
 
 # void mp1_ioctl_add:
@@ -205,9 +204,9 @@ mp1_ioctl_add:
         pushl %edi # to
 
         call mp1_copy_from_user
-        cmpl $0, %eax 
-        jne TEARDOWN_COPY_FROM_USER # error, not all bytes copied
         addl $12, %esp
+        cmpl $0, %eax 
+        jne FREE_MEMORY # error, not all bytes copied
        # popl %edx
        # popl %ecx
        # popl %eax 
@@ -254,14 +253,6 @@ STATUS_OFF_ADD:
 SUCCESS_ADD:
         xor %eax, %eax # retval = 0
         jmp DONE_ADD
-
-TEARDOWN_COPY_FROM__USER:
-        # tear down the previous call
-        # 3 arg + 3 caller saved registers 
-        addl $12, %esp 
-       # popl %edx
-       # popl %ecx
-       # popl %eax 
 
 FREE_MEMORY:
 
@@ -336,28 +327,29 @@ mp1_ioctl_find:
         pushl %edi
 
         movl 8(%ebp), %ebx # load arg
-        cmpl $0, %ebx # check for valid structure
-        je ERROR_FIND
-        movl LOCATION(%ebx), %cx # location to find in cx
+        cmpl $0, %ebx 
+        je ERROR_FIND # invalid structure input
+        xor %ecx, %ecx
+        movw LOCATION(%ebx), %cx # location to find in cx
 
-        pushl %cx # push the location to find
+        pushl %ecx # push the location to find
         pushl %ebx # pushl the list to search
 
         call mp1_search_list
+        popl %ebx # pop args off
+        popl %ecx 
+        cmpl $0, %eax
+        je ERROR_FIND # didn't find in list
 
-        addl $6, %esp # pop arguments off
-
-
+        # found in list
         pushl $STRUCT_SIZE # size
         pushl %edi # from
         pushl %ebx # to
 
         call mp1_copy_to_user
+        addl $12, %esp # pop 3x4bit args from stack
         cmpl $0, %eax 
-        jne TEARDOWN_COPY_TO_USER # error, not all bytes copied
-        addl $12, %esp
-
-TEARDOWN_COPY_TO_USER:
+        jne ERROR_FIND
 
 SUCCESS_FIND:
         xor %eax, %eax
@@ -377,9 +369,13 @@ DONE_FIND:
 # Interface: 
 #        Inputs: unsigned long arg
 #       Outputs: 0 if succesful, -1 if error
-#     Registers: %ebx - arg, upper 16 bits = first integer
-#                %bx - arg, second integer      
-#                %eax - return value                  
+#     Registers: %edx - arg, upper 16 bits = 1st char, rest = 2nd char
+#                       %dx - 1st char, upper bits of arg
+#                %ecx -  hold part of arg
+#                       %cx - 2nd char, lower bits of arg
+#                %eax - return value, temp for hold values of one struct       
+#                %edi - address of char 1 struct
+#                %esi - address of char 2 struct           
 
 mp1_ioctl_sync:
         pushl %ebp
@@ -388,17 +384,76 @@ mp1_ioctl_sync:
         pushl %esi
         pushl %edi
 
-        movl 8(%ebp), %ebx # load arg
+        movl 8(%ebp), %edx # load arg
+        xor %ecx, %ecx
+        movw %dx, %cx   # lower bits into cx
+        shrl $16, %edx # shift right to get upper 16 bits into lower 16 bits dx
+
+        # get ready to search for 1st char
+        pushl %ecx # caller save arg registers
+        pushl %edx
+
+        pushl %edx # next push args
+        pushl mp1_list_head
+
+        call mp1_search_list
+        addl $8, %esp # next pop 2x4bit args
+        popl %edx # caller restore registers
+        popl %ecx
+
+        cmpl $0, %eax  
+        je ERROR_SYNC # didn't find location matching char 1
+        movl %eax, %edi # edi is address of struct with location for char 1
+
+        # get ready to search for 2nd char
+        pushl %ecx # caller save arg registers
+        pushl %edx
+
+        pushl %ecx
+        pushl mp1_list_head
+
+        call mp1_search_list
+        addl $8, %esp # pop 2x4bit args off stack
+        popl %edx # caller restore registers 
+        popl %ecx
+
+        cmpl $0, %eax
+        je ERROR_SYNC # didn't find location matching char 2
+        movl %eax, %esi # esi is address of struct with location for char 2
+
+        # found location of both characters
+        movw ON_LENGTH(%edi), %ax # copy onlength, offlength, countdown, status
+        movw %ax, ON_LENGTH(%esi) # from char 1 edi to char 2 esi
+        movw OFF_LENGTH(%edi), %ax
+        movw %ax, OFF_LENGTH(%esi)
+        movw COUNTDOWN(%edi), %ax
+        movw %ax, COUNTDOWN(%esi)
+        movw STATUS(%edi), %ax
+        movw %ax, STATUS(%esi)
+
+        # get ready for m1_poke for 2nd location
+        xor %ecx, %ecx # clear registers for poke
+        xor %eax, %eax
+        cmpl $0, STATUS(%esi) 
+        je STATUS_OFF_SYNC 
+        movb ON_CHAR(%esi), %cl # on char for poke
+
+STATUS_OFF_SYNC:
+        movb OFF_CHAR(%esi), %cl # off char for poke
 
 SUCCESS_SYNC:
-        xor %eax, %eax
+        # call poke
+        movw LOCATION(%esi), %ax  # location for poke
+        shll $1, %eax # fix display error
+        call mp1_poke 
+        xor %eax, %eax # update retval for success
         jmp DONE_SYNC
 
 ERROR_SYNC:
-        movl $-1, %eax
+        movl $-1, %eax # update retval for fail
 
 DONE_SYNC:
-        popl  %edi
+        popl  %edi # callee tear down registers
         popl  %esi
         popl  %ebx
         leave
@@ -409,7 +464,7 @@ DONE_SYNC:
 #
 # Interface: 
 #        Inputs: unsigned long list to search
-#              : unsigned short location to find
+#              : unsigned long location to find
 #       Outputs: address of found struct, or null if not found
 #     Registers: %ebx - list
 #                %ecx - location to find    
@@ -423,7 +478,7 @@ mp1_search_list:
         pushl %edi
 
         movl 8(%ebp), %edi # load list to search
-        movb 12(%ebp), %cx # load location to find
+        movl 12(%ebp), %ecx # load location to find
 
 LOOP_SEARCH_LIST:
         # check location of current node
