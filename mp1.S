@@ -74,16 +74,8 @@ mp1_rtc_tasklet:
 
 LIST_LOOP:
         # decrement countdown
-        # for some reason this doesn't work.... Don't understand 
-        # movw COUNTDOWN(%edi), %bx # just for debugging
-        # decw COUNTDOWN(%edi)
-        # movw COUNTDOWN(%edi), %bx # just for debugging
-
-        # this works
-        movw COUNTDOWN(%edi), %bx
-        decw %bx
-        movw %bx, COUNTDOWN(%edi)
-
+        addw $-1, COUNTDOWN(%edi)
+        
        # comment cmpw $0, %bx
         cmpw $0, COUNTDOWN(%edi)
         jne CHECK_NEXT_STRUCT
@@ -186,10 +178,10 @@ mp1_ioctl_add:
         pushl $STRUCT_SIZE # load size to push as argument
 
         call mp1_malloc # check %eax return value for error
+        addl $4, %esp # pop arg off stack
         cmpl $0, %eax
-        je POP_ONE_VAL # error, malloc returned NULL 
+        je ERROR_ADD # error, malloc returned NULL 
         movl %eax, %edi # edi = address of new struct
-        addl $4, %esp # no error, caller tear down m1_malloc
        # popl %edx
        # popl %ecx
        # popl %eax 
@@ -206,7 +198,7 @@ mp1_ioctl_add:
         call mp1_copy_from_user
         addl $12, %esp
         cmpl $0, %eax 
-        jne FREE_MEMORY # error, not all bytes copied
+        jne FREE_MEMORY_ADD # error, not all bytes copied
        # popl %edx
        # popl %ecx
        # popl %eax 
@@ -215,7 +207,7 @@ mp1_ioctl_add:
         xorl %eax, %eax
         movw LOCATION(%edi), %ax # eax = value of location
         cmpl $1999, %eax # location - (80*25-1) 
-        ja FREE_MEMORY # location out of range error
+        ja FREE_MEMORY_ADD # location out of range error
 
         xorl %ecx, %ecx
         movw ON_LENGTH(%edi), %cx # ecx = value of onlength
@@ -254,13 +246,12 @@ SUCCESS_ADD:
         xor %eax, %eax # retval = 0
         jmp DONE_ADD
 
-FREE_MEMORY:
-
+FREE_MEMORY_ADD:
         # caller set up for mp1_free
-       # pushl %eax
-       # pushl %ecx
-       # pushl %edx
-       # pushl %edi # address of memory to free
+        # pushl %eax
+        # pushl %ecx
+        # pushl %edx
+        pushl %edi # address of memory to free
 
         call mp1_free
         # caller tear down mp1_free
@@ -268,10 +259,7 @@ FREE_MEMORY:
         # popl %edx
         # popl %ecx
         # popl %eax 
-        # jmp ERROR_ADD
 
-POP_ONE_VAL:
-        addl $4, %esp
 ERROR_ADD:
         movl $-1, %eax # retval = -1
 
@@ -287,7 +275,10 @@ DONE_ADD:
 # Interface: 
 #        Inputs: unsigned long arg
 #       Outputs: 0 if succesful, -1 if not
-#     Registers: %ebx - arg      
+#     Registers: %ebx - arg location to remove, address of current struct
+#                     - address of struct whos ->next is struct to remove
+#                %edi - address of struct to remove
+#                %eax - return value, location of new struct, temp struct address storage    
 mp1_ioctl_remove:
         pushl %ebp
         movl  %esp, %ebp
@@ -295,9 +286,50 @@ mp1_ioctl_remove:
         pushl %esi
         pushl %edi
 
-        movl 8(%ebp), %ebx # load arg
+        movl 8(%ebp), %ebx # load arg, location of struct to remove
+        movl mp1_list_head, %edi # check list head is valid
+        cmpl $0, %edi 
+        je ERROR_REMOVE # error if head is null
 
-SUCCESS_REMOVE:
+        # need to search list
+        pushl %ebx # next push args to stack
+        pushl mp1_list_head
+        call mp1_search_list
+        addl $8, %esp # pop 2x4bit args 
+        cmpl $0, %eax
+        je ERROR_REMOVE # didn't find location in list
+        movl %eax, %edi # load remove address into edi
+
+        # special case head node is node to remove
+        cmpl mp1_list_head, %edi 
+        je HEAD_REMOVE # node to remove is head
+
+        # node to remove is in the middle of the list
+        # need to find the node whos node->next is node to remove
+        movl mp1_list_head, %ebx # set head to be the node being examined
+LOOP_REMOVE:
+        cmpl NEXT(%ebx), %edi
+        je REMOVE_FROM_LIST
+        movl NEXT(%ebx), %ebx # go to the next node to keep looking
+        jmp LOOP_REMOVE 
+
+REMOVE_FROM_LIST: # remove the node from the list
+        movl NEXT(%edi), %eax # eax = node to remove -> next
+        movl %eax, NEXT(%ebx) # ebx->next = node to remove-> next 
+        movl $0, NEXT(%edi) # node to move->next = null 
+        jmp FREE_MEMORY_REMOVE
+HEAD_REMOVE:
+        movl mp1_list_head, %edi # get address of head for free
+        movl NEXT(%edi), %eax 
+        movl %eax, mp1_list_head # new head = old head->next 
+        movl $0, NEXT(%edi) # set old head->next to null
+       
+FREE_MEMORY_REMOVE: # free the memory from the removed node
+        pushl %edi
+        call mp1_free
+        addl $4, %esp
+
+SUCCESS_REMOVE: # set retval
         xor %eax, %eax
         jmp DONE_REMOVE
 
