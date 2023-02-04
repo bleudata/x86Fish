@@ -41,12 +41,7 @@ mp1_poke:
 	ret
 
 # void mp1_rtc_tasklet:
-# called when RTC interrupt is generated
-# examine list of blink_struct.
-# first decrement countdown status field. if = 1, location has on_character. if = 0, off_char
-# function switches to the opposite charater by switching status field with(or and..? call to poke
-# finally, copy value from opposite length field to countdown
-# the go to next item in list, return when reach end of list
+# makes the fish blink
 #
 # Interface: 
 #        Inputs: unsigned long arg
@@ -63,8 +58,6 @@ mp1_rtc_tasklet:
         pushl %esi
         pushl %edi
        
-     #   movl 8(%ebp), %ebx
-
         # get mp_list_head
         movl mp1_list_head, %edi
 
@@ -73,9 +66,9 @@ mp1_rtc_tasklet:
         je DONE_TASKLET 
 
         xor %ebx, %ebx
-        movw COUNTDOWN(%edi), %bx # just for debugging
-        movw ON_LENGTH(%edi), %bx
-        movw OFF_LENGTH(%edi), %bx
+       # movw COUNTDOWN(%edi), %bx # just for debugging
+       # movw ON_LENGTH(%edi), %bx
+       # movw OFF_LENGTH(%edi), %bx
         cmpw $0, COUNTDOWN(%edi) # check if countdown is initially 0
         je COUNTDOWN_ZERO
 
@@ -166,17 +159,12 @@ ERROR_ICTL:
 	ret
 
 # void mp1_ioctl_add:
-# 1. mp1_malloc to store a new copy of the structure
-# 2. user mp1_copy_from_user to copy entire mp1 blink struct to newly allocated memory
-# 3. Set countdown = onlength 
-# 4. Set status = 1
-# 5. insert struct add head of list using mp1_list_head pointer
-# 6. call mp1_poke to display character
-# 7. Should return 0 if successful 
+# makes the fish appear
+# 
 # Interface: 
 #        Inputs: unsigned long arg
 #       Outputs: 0 if succesful add performed, -1 if error
-#     Registers: %ebx - input arg
+#     Registers: %ebx - input arg old structure
 #                %ecx - temp storage for computations
 #                       %cl - char for poke                        
 #                %eax - return value, temp storage, location for poke
@@ -193,9 +181,9 @@ mp1_ioctl_add:
         je ERROR_ADD
 
         # allocate memory for copy of structure
-        ; pushl %eax # caller set up for mp1_malloc
-        ; pushl %ecx
-        ; pushl %edx
+        # pushl %eax # caller set up for mp1_malloc
+        # pushl %ecx
+        # pushl %edx
         pushl $STRUCT_SIZE # load size to push as argument
 
         call mp1_malloc # check %eax return value for error
@@ -203,14 +191,14 @@ mp1_ioctl_add:
         je POP_ONE_VAL # error, malloc returned NULL 
         movl %eax, %edi # edi = address of new struct
         addl $4, %esp # no error, caller tear down m1_malloc
-        ; popl %edx
-        ; popl %ecx
-        ; popl %eax 
+       # popl %edx
+       # popl %ecx
+       # popl %eax 
 
         # copy struct from user space to new memory
-        ; pushl %eax # caller set up mp1_copy_from_user
-        ; pushl %ecx
-        ; pushl %edx
+       # pushl %eax # caller set up mp1_copy_from_user
+       # pushl %ecx
+       # pushl %edx
 
         pushl $STRUCT_SIZE # size
         pushl %ebx # from
@@ -218,11 +206,11 @@ mp1_ioctl_add:
 
         call mp1_copy_from_user
         cmpl $0, %eax 
-        jne TEARDOWN_COPY_USER # error, not all bytes copied
+        jne TEARDOWN_COPY_FROM_USER # error, not all bytes copied
         addl $12, %esp
-        ; popl %edx
-        ; popl %ecx
-        ; popl %eax 
+       # popl %edx
+       # popl %ecx
+       # popl %eax 
          
         # check location
         xorl %eax, %eax
@@ -267,29 +255,29 @@ SUCCESS_ADD:
         xor %eax, %eax # retval = 0
         jmp DONE_ADD
 
-TEARDOWN_COPY_USER:
+TEARDOWN_COPY_FROM__USER:
         # tear down the previous call
         # 3 arg + 3 caller saved registers 
         addl $12, %esp 
-        ; popl %edx
-        ; popl %ecx
-        ; popl %eax 
+       # popl %edx
+       # popl %ecx
+       # popl %eax 
 
 FREE_MEMORY:
 
         # caller set up for mp1_free
-        ; pushl %eax
-        ; pushl %ecx
-        ; pushl %edx
-        pushl %edi # address of memory to free
+       # pushl %eax
+       # pushl %ecx
+       # pushl %edx
+       # pushl %edi # address of memory to free
 
         call mp1_free
         # caller tear down mp1_free
         addl $4, %esp
-        ; popl %edx
-        ; popl %ecx
-        ; popl %eax 
-        jmp ERROR_ADD
+        # popl %edx
+        # popl %ecx
+        # popl %eax 
+        # jmp ERROR_ADD
 
 POP_ONE_VAL:
         addl $4, %esp
@@ -336,7 +324,10 @@ DONE_REMOVE:
 # Interface: 
 #        Inputs: unsigned long arg
 #       Outputs: 0 is succesful, -1 if error
-#     Registers: %ebx - arg     
+#     Registers: %ebx - arg pointer to original struct
+#                %ecx - location to find 
+#                %eax - return value, location of new struct
+#                %edi - address of new struct
 mp1_ioctl_find:
         pushl %ebp
         movl  %esp, %ebp
@@ -345,8 +336,28 @@ mp1_ioctl_find:
         pushl %edi
 
         movl 8(%ebp), %ebx # load arg
+        cmpl $0, %ebx # check for valid structure
+        je ERROR_FIND
+        movl LOCATION(%ebx), %cx # location to find in cx
+
+        pushl %cx # push the location to find
+        pushl %ebx # pushl the list to search
+
+        call mp1_search_list
+
+        addl $6, %esp # pop arguments off
 
 
+        pushl $STRUCT_SIZE # size
+        pushl %edi # from
+        pushl %ebx # to
+
+        call mp1_copy_to_user
+        cmpl $0, %eax 
+        jne TEARDOWN_COPY_TO_USER # error, not all bytes copied
+        addl $12, %esp
+
+TEARDOWN_COPY_TO_USER:
 
 SUCCESS_FIND:
         xor %eax, %eax
@@ -364,7 +375,7 @@ DONE_FIND:
 # void mp1_ioctl_sync:
 #
 # Interface: 
-#        Inputs: unsigned long arg 
+#        Inputs: unsigned long arg
 #       Outputs: 0 if succesful, -1 if error
 #     Registers: %ebx - arg, upper 16 bits = first integer
 #                %bx - arg, second integer      
@@ -387,6 +398,46 @@ ERROR_SYNC:
         movl $-1, %eax
 
 DONE_SYNC:
+        popl  %edi
+        popl  %esi
+        popl  %ebx
+        leave
+	ret
+
+
+# int mp1_search_list:
+#
+# Interface: 
+#        Inputs: unsigned long list to search
+#              : unsigned short location to find
+#       Outputs: address of found struct, or null if not found
+#     Registers: %ebx - list
+#                %ecx - location to find    
+#                %eax - return value, current location value
+#                %edi - original list to search, address of new struct
+mp1_search_list:
+        pushl %ebp
+        movl  %esp, %ebp
+        pushl %ebx
+        pushl %esi
+        pushl %edi
+
+        movl 8(%ebp), %edi # load list to search
+        movb 12(%ebp), %cx # load location to find
+
+LOOP_SEARCH_LIST:
+        # check location of current node
+        movw LOCATION(%edi), %ax
+        cmpw %ax, %cx 
+        je DONE_SEARCH_LIST
+
+        # didn't find location
+        movl NEXT(%edi), %edi
+        cmpl $0, NEXT(%edi) 
+        jne LOOP_SEARCH_LIST # check the next node
+
+DONE_SEARCH_LIST:
+        movl  %edi, %eax # load return value 
         popl  %edi
         popl  %esi
         popl  %ebx
