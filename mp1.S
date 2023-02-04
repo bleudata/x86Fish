@@ -50,10 +50,11 @@ mp1_poke:
 #
 # Interface: 
 #        Inputs: unsigned long arg
-#       Outputs: %eax will be -1 for an error if the cmd value was not 0-3
-#     Registers: %ebx - arg
-#                %eax return value
-#                %ecx - struct / node pointer
+#       Outputs: none
+#     Registers: %ebx - arg, temp for holding struct info
+#                %eax - location value for poke, return value
+#                %ecx - char value for  poke
+#                %edi - struct / node pointer
 #                %esi - temp for holding value in the struct
 mp1_rtc_tasklet:
         pushl %ebp
@@ -61,15 +62,79 @@ mp1_rtc_tasklet:
         pushl %ebx
         pushl %esi
         pushl %edi
-
-        # make two local variables 
-        # get values from the stack 
        
-        movl 8(%ebp), %ebx
+     #   movl 8(%ebp), %ebx
+
+        # get mp_list_head
+        movl mp1_list_head, %edi
+
+        # check if null 
+        cmpl $0, %edi
+        je DONE_TASKLET 
+
+        xor %ebx, %ebx
+        ; movw COUNTDOWN(%edi), %bx # just for debugging
+        ; movw ON_LENGTH(%edi), %bx
+        ; movw OFF_LENGTH(%edi), %bx
+        ; cmpw $0, COUNTDOWN(%edi) # check if countdown is initially 0
+        ; je COUNTDOWN_ZERO
+
 LIST_LOOP:
+        # decrement countdown
+        # for some reason this doesn't work.... Don't understand 
+        ; movw COUNTDOWN(%edi), %bx # just for debugging
+        ; decw COUNTDOWN(%edi)
+        ; movw COUNTDOWN(%edi), %bx # just for debugging
+        
+        # this works though for some reason
+        movw COUNTDOWN(%edi), %bx
+        decw %bx
+        movw %bx, COUNTDOWN(%edi)
 
+       # cmpw $0, %bx
+        cmpw $0, COUNTDOWN(%edi)
+        jne CHECK_NEXT_STRUCT
 
-DONE:
+COUNTDOWN_ZERO:
+        movw STATUS(%edi), %bx # just for debugging
+        cmpw $0, STATUS(%edi)
+        je STATUS_OFF_TASKLET
+
+        # clear registers for poke
+        xor %ecx, %ecx
+        xor %eax, %eax
+
+        # need to change status to off
+        movb OFF_CHAR(%edi), %cl
+        movw $0, STATUS(%edi) # maybe don't need to change status
+        movw STATUS(%edi), %bx # just for debugging
+        movw LOCATION(%edi), %ax
+        shll $1, %eax # maybe don't need shift, but try for now
+        call mp1_poke
+        movw OFF_LENGTH(%edi), %bx
+        movw %bx, COUNTDOWN(%edi)
+        jmp CHECK_NEXT_STRUCT
+
+STATUS_OFF_TASKLET:
+        # clear registerse for poke
+        xor %ecx, %ecx
+        xor %eax, %eax
+        # need to change status to on
+        movb ON_CHAR(%edi), %cl 
+        movw $1, STATUS(%edi) # maybe don't need to change status
+        movw LOCATION(%edi), %ax
+        shll $1, %eax # maybe don't need to shift, but try for now
+        call mp1_poke
+        movw ON_LENGTH(%edi), %bx # bx = on_length
+        movw %bx, COUNTDOWN(%edi)
+
+CHECK_NEXT_STRUCT:
+        movl NEXT(%edi), %edi 
+        cmpl $0, %edi
+        je DONE_TASKLET # end of list because next is null
+        jmp LIST_LOOP # examine new struct
+
+DONE_TASKLET:
         popl  %edi
         popl  %esi
         popl  %ebx
@@ -85,7 +150,6 @@ DONE:
 #       Outputs: 0 if succesful, -1 if cmd is not 0-3 or other error
 #     Registers: %ebx -  arg
 #                %ecx - cmd
-
 #       
 mp1_ioctl:
 
@@ -182,7 +246,7 @@ mp1_ioctl_add:
         xorl %eax, %eax
         movw STATUS(%edi), %cx 
         cmpl $0, %ecx # ecx-0
-        je STATUS_OFF
+        je STATUS_OFF_ADD
         xorl %ecx, %ecx
         movb ON_CHAR(%edi), %cl
         xorl %eax, %eax
@@ -191,7 +255,7 @@ mp1_ioctl_add:
         call mp1_poke
         jmp SUCCESS_ADD
 
-STATUS_OFF:
+STATUS_OFF_ADD:
         xor %ecx, %ecx
         movb OFF_CHAR(%edi), %cl
         xor %eax, %eax
