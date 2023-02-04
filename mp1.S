@@ -73,25 +73,25 @@ mp1_rtc_tasklet:
         je DONE_TASKLET 
 
         xor %ebx, %ebx
-        ; movw COUNTDOWN(%edi), %bx # just for debugging
-        ; movw ON_LENGTH(%edi), %bx
-        ; movw OFF_LENGTH(%edi), %bx
-        ; cmpw $0, COUNTDOWN(%edi) # check if countdown is initially 0
-        ; je COUNTDOWN_ZERO
+        movw COUNTDOWN(%edi), %bx # just for debugging
+        movw ON_LENGTH(%edi), %bx
+        movw OFF_LENGTH(%edi), %bx
+        cmpw $0, COUNTDOWN(%edi) # check if countdown is initially 0
+        je COUNTDOWN_ZERO
 
 LIST_LOOP:
         # decrement countdown
         # for some reason this doesn't work.... Don't understand 
-        ; movw COUNTDOWN(%edi), %bx # just for debugging
-        ; decw COUNTDOWN(%edi)
-        ; movw COUNTDOWN(%edi), %bx # just for debugging
-        
-        # this works though for some reason
+        # movw COUNTDOWN(%edi), %bx # just for debugging
+        # decw COUNTDOWN(%edi)
+        # movw COUNTDOWN(%edi), %bx # just for debugging
+
+        # this works
         movw COUNTDOWN(%edi), %bx
         decw %bx
         movw %bx, COUNTDOWN(%edi)
 
-       # cmpw $0, %bx
+       # comment cmpw $0, %bx
         cmpw $0, COUNTDOWN(%edi)
         jne CHECK_NEXT_STRUCT
 
