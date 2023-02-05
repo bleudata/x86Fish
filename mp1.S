@@ -46,81 +46,69 @@ mp1_poke:
 # Interface: 
 #        Inputs: unsigned long arg
 #       Outputs: none
-#     Registers: %ebx - arg, temp for holding struct info
-#                %eax - location value for poke, return value
+#     Registers: %ebx - arg, temp for holding struct info/values
+#                %eax - location value for poke
 #                %ecx - char value for  poke
 #                %edi - struct / node pointer
-#                %esi - temp for holding value in the struct
 mp1_rtc_tasklet:
-        pushl %ebp
+        pushl %ebp # callee stack setup ebp and save registers
         movl  %esp, %ebp
         pushl %ebx
         pushl %esi
         pushl %edi
        
-        # get mp_list_head
+       # check if head is null
         movl mp1_list_head, %edi
+        cmpl $0, %edi 
+        je DONE_TASKLET # done if head null
 
-        # check if null 
-        cmpl $0, %edi
-        je DONE_TASKLET 
-
-        xor %ebx, %ebx
-       # movw COUNTDOWN(%edi), %bx # just for debugging
-       # movw ON_LENGTH(%edi), %bx
-       # movw OFF_LENGTH(%edi), %bx
+        # head not null, check if countdown = 0
         cmpw $0, COUNTDOWN(%edi) # check if countdown is initially 0
         je COUNTDOWN_ZERO
 
 LIST_LOOP:
-        # decrement countdown
+        # decrement countdown and check again if 0
         addw $-1, COUNTDOWN(%edi)
-        
-       # comment cmpw $0, %bx
         cmpw $0, COUNTDOWN(%edi)
-        jne CHECK_NEXT_STRUCT
+        jne CHECK_NEXT_STRUCT # done with this struct if not 0
 
 COUNTDOWN_ZERO:
-        movw STATUS(%edi), %bx # just for debugging
-        cmpw $0, STATUS(%edi)
-        je STATUS_OFF_TASKLET
-
-        # clear registers for poke
+        # clear registers for poke and checking 16 bit values
         xor %ecx, %ecx
         xor %eax, %eax
+        xor %ebx, %ebx
 
-        # need to change status to off
-        movb OFF_CHAR(%edi), %cl
-        movw $0, STATUS(%edi) # maybe don't need to change status
-        movw STATUS(%edi), %bx # just for debugging
-        movw LOCATION(%edi), %ax
-        shll $1, %eax # maybe don't need shift, but try for now
+        cmpw $0, STATUS(%edi) # check status 
+        je STATUS_OFF_TASKLET
+
+        # current status = ON, change status to OFF
+        movb OFF_CHAR(%edi), %cl # load char
+        movw $0, STATUS(%edi) # change status to OFF
+        movw LOCATION(%edi), %ax # get location
+        shll $1, %eax # shift location to fix display
         call mp1_poke
-        movw OFF_LENGTH(%edi), %bx
+        movw OFF_LENGTH(%edi), %bx # change countdown to OFF_LENGTH
         movw %bx, COUNTDOWN(%edi)
         jmp CHECK_NEXT_STRUCT
 
 STATUS_OFF_TASKLET:
-        # clear registerse for poke
-        xor %ecx, %ecx
-        xor %eax, %eax
-        # need to change status to on
-        movb ON_CHAR(%edi), %cl 
-        movw $1, STATUS(%edi) # maybe don't need to change status
-        movw LOCATION(%edi), %ax
-        shll $1, %eax # maybe don't need to shift, but try for now
+        # current status = OFF, change status to ON
+        movb ON_CHAR(%edi), %cl # load char
+        movw $1, STATUS(%edi) # change status to ON
+        movw LOCATION(%edi), %ax # get location
+        shll $1, %eax # shift location to fix display
         call mp1_poke
-        movw ON_LENGTH(%edi), %bx # bx = on_length
+        movw ON_LENGTH(%edi), %bx # change countdown to ON_LENGTH
         movw %bx, COUNTDOWN(%edi)
 
 CHECK_NEXT_STRUCT:
         movl NEXT(%edi), %edi 
-        cmpl $0, %edi
-        je DONE_TASKLET # end of list because next is null
-        jmp LIST_LOOP # examine new struct
+        cmpl $0, %edi # check if reached end of list
+        je DONE_TASKLET # end of list 
+        jmp LIST_LOOP # more in list, loop back for next struct
 
 DONE_TASKLET:
-        popl  %edi
+        popl  %edi # callee tear down 
         popl  %esi
         popl  %ebx
         leave
@@ -161,36 +149,25 @@ ERROR_ICTL:
 #                %eax - return value, temp storage, location for poke
 #                %edi - address of new struct
 mp1_ioctl_add:
-        pushl %ebp
+        pushl %ebp # callee stack set up 
         movl  %esp, %ebp
         pushl %ebx
         pushl %esi
         pushl %edi
 
         movl 8(%ebp), %ebx # load arg
-        cmpl $0, %ebx # invalid struct arg 
+        cmpl $0, %ebx # check if invalid struct arg 
         je ERROR_ADD
 
         # allocate memory for copy of structure
-        # pushl %eax # caller set up for mp1_malloc
-        # pushl %ecx
-        # pushl %edx
-        pushl $STRUCT_SIZE # load size to push as argument
-
-        call mp1_malloc # check %eax return value for error
+        pushl $STRUCT_SIZE # push size for malloc
+        call mp1_malloc
         addl $4, %esp # pop arg off stack
-        cmpl $0, %eax
+        cmpl $0, %eax # check %eax return value for error
         je ERROR_ADD # error, malloc returned NULL 
         movl %eax, %edi # edi = address of new struct
-       # popl %edx
-       # popl %ecx
-       # popl %eax 
 
         # copy struct from user space to new memory
-       # pushl %eax # caller set up mp1_copy_from_user
-       # pushl %ecx
-       # pushl %edx
-
         pushl $STRUCT_SIZE # size
         pushl %ebx # from
         pushl %edi # to
@@ -199,10 +176,7 @@ mp1_ioctl_add:
         addl $12, %esp
         cmpl $0, %eax 
         jne FREE_MEMORY_ADD # error, not all bytes copied
-       # popl %edx
-       # popl %ecx
-       # popl %eax 
-         
+
         # check location
         xorl %eax, %eax
         movw LOCATION(%edi), %ax # eax = value of location
@@ -220,26 +194,22 @@ mp1_ioctl_add:
         movl %ecx, NEXT(%edi) # new_node->next = old_head
         movl %edi, mp1_list_head # head = new_node
 
-        # load registers for poke
-        xorl %ecx, %ecx
+        
+        xorl %ecx, %ecx # clear out any garbage
         xorl %eax, %eax
         movw STATUS(%edi), %cx 
-        cmpl $0, %ecx # ecx-0
-        je STATUS_OFF_ADD
-        xorl %ecx, %ecx
-        movb ON_CHAR(%edi), %cl
-        xorl %eax, %eax
+        cmpl $0, %ecx # check status
+        je STATUS_OFF_ADD # current status off
+        movb ON_CHAR(%edi), %cl # load char/location for poke
         movw LOCATION(%edi), %ax
-        shll $1, %eax
+        shll $1, %eax # shift to fix display
         call mp1_poke
         jmp SUCCESS_ADD
 
 STATUS_OFF_ADD:
-        xor %ecx, %ecx
-        movb OFF_CHAR(%edi), %cl
-        xor %eax, %eax
+        movb OFF_CHAR(%edi), %cl # load char/location for poke
         movw LOCATION(%edi), %ax
-        shll $1, %eax
+        shll $1, %eax # shift to fix display
         call mp1_poke
 
 SUCCESS_ADD:
@@ -247,18 +217,9 @@ SUCCESS_ADD:
         jmp DONE_ADD
 
 FREE_MEMORY_ADD:
-        # caller set up for mp1_free
-        # pushl %eax
-        # pushl %ecx
-        # pushl %edx
         pushl %edi # address of memory to free
-
         call mp1_free
-        # caller tear down mp1_free
-        addl $4, %esp
-        # popl %edx
-        # popl %ecx
-        # popl %eax 
+        addl $4, %esp # pop arg 
 
 ERROR_ADD:
         movl $-1, %eax # retval = -1
@@ -271,9 +232,9 @@ DONE_ADD:
 	ret
 
 # void mp1_ioctl_remove:
-#
+# Remove a struct from the list based on  location
 # Interface: 
-#        Inputs: unsigned long arg
+#        Inputs: unsigned long arg, location field of struct to remove
 #       Outputs: 0 if succesful, -1 if not
 #     Registers: %ebx - arg location to remove, address of current struct
 #                     - address of struct whos ->next is struct to remove
@@ -300,24 +261,25 @@ mp1_ioctl_remove:
         je ERROR_REMOVE # didn't find location in list
         movl %eax, %edi # load remove address into edi
 
-        # special case head node is node to remove
-        cmpl mp1_list_head, %edi 
+        
+        cmpl mp1_list_head, %edi # special case head node is node to remove
         je HEAD_REMOVE # node to remove is head
 
         # node to remove is in the middle of the list
         # need to find the node whos node->next is node to remove
-        movl mp1_list_head, %ebx # set head to be the node being examined
+        movl mp1_list_head, %ebx # head is first node to check
 LOOP_REMOVE:
-        cmpl NEXT(%ebx), %edi
-        je REMOVE_FROM_LIST
-        movl NEXT(%ebx), %ebx # go to the next node to keep looking
+        cmpl NEXT(%ebx), %edi # if the current node points to node to remove
+        je REMOVE_FROM_LIST # go to start removing
+        movl NEXT(%ebx), %ebx # keep looking, go to next node
         jmp LOOP_REMOVE 
 
 REMOVE_FROM_LIST: # remove the node from the list
         movl NEXT(%edi), %eax # eax = node to remove -> next
-        movl %eax, NEXT(%ebx) # ebx->next = node to remove-> next 
+        movl %eax, NEXT(%ebx) # set ebx->next = node to remove-> next 
         movl $0, NEXT(%edi) # node to move->next = null 
         jmp FREE_MEMORY_REMOVE
+
 HEAD_REMOVE:
         movl mp1_list_head, %edi # get address of head for free
         movl NEXT(%edi), %eax 
@@ -330,11 +292,11 @@ FREE_MEMORY_REMOVE: # free the memory from the removed node
         addl $4, %esp
 
 SUCCESS_REMOVE: # set retval
-        xor %eax, %eax
+        xor %eax, %eax # retval = 0
         jmp DONE_REMOVE
 
 ERROR_REMOVE:
-        movl $-1, %eax
+        movl $-1, %eax # retval = -1
 DONE_REMOVE:
         popl  %edi
         popl  %esi
@@ -343,7 +305,8 @@ DONE_REMOVE:
 	ret
 
 # void mp1_ioctl_find:
-#
+# find and copy element from kernel to user structure
+# works with sync to make I/M flash in sync with the rest of the fish frame
 # Interface: 
 #        Inputs: unsigned long arg
 #       Outputs: 0 is succesful, -1 if error
@@ -364,7 +327,7 @@ mp1_ioctl_find:
         je ERROR_FIND # invalid structure input
         
 
-        # malloc 
+        # malloc space to copy struct from user 
         pushl $STRUCT_SIZE # load size to push as argument
         call mp1_malloc # check %eax return value for error
         addl $4, %esp # pop arg off stack
@@ -372,20 +335,21 @@ mp1_ioctl_find:
         je ERROR_FIND # error, malloc returned NULL 
         movl %eax, %esi # esi = address of new struct
 
-        # copy_from_user
+        # next push args for  copy_from_user
         pushl $STRUCT_SIZE # size
         pushl %ebx # from
         pushl %esi # to
 
         call mp1_copy_from_user
-        addl $12, %esp
+        addl $12, %esp # pop args
         cmpl $0, %eax 
         jne ERROR_FIND # error, not all bytes copied
 
         # get location
         xorl %ecx, %ecx
-        movw LOCATION(%esi), %cx # location to find in cx
- 
+        movw LOCATION(%esi), %cx # cx = location to find 
+        
+        # look for location in the list 
         pushl %ecx # push the location to find
         pushl %esi # pushl the list to search
 
@@ -395,7 +359,7 @@ mp1_ioctl_find:
         cmpl $0, %eax
         je ERROR_FIND # didn't find in list
         movl %eax, %edi
-        # found in list
+        # found in list, now copy to user space
         pushl $STRUCT_SIZE # size
         pushl %edi # from
         pushl %ebx # to
@@ -403,19 +367,20 @@ mp1_ioctl_find:
         call mp1_copy_to_user
         addl $12, %esp # pop 3x4bit args from stack
         cmpl $0, %eax 
-        jne ERROR_FIND
+        jne ERROR_FIND # not all bytes copied
 
 SUCCESS_FIND:
-        xor %eax, %eax
+        xor %eax, %eax # retval = 0 for success
         jmp DONE_FIND
 
 ERROR_FIND:
-        movl $-1, %eax
+        movl $-1, %eax # retval = -1 for fail
 DONE_FIND:
         # free the original struct from kernel space
         pushl %esi
         call mp1_free
         addl $4, %esp
+        # callee tear down
         popl  %edi
         popl  %esi
         popl  %ebx
@@ -423,7 +388,7 @@ DONE_FIND:
 	ret
 
 # void mp1_ioctl_sync:
-#
+# Syncs I/M flashing with rest of fish frame, works with find
 # Interface: 
 #        Inputs: unsigned long arg
 #       Outputs: 0 if succesful, -1 if error
@@ -443,8 +408,8 @@ mp1_ioctl_sync:
         pushl %edi
 
         movl 8(%ebp), %edx # load arg
-        xor %ecx, %ecx
-        movw %dx, %cx   # lower bits into cx
+        xor %ecx, %ecx 
+        movw %dx, %cx  # lower bits into cx
         shrl $16, %edx # shift right to get upper 16 bits into lower 16 bits dx
 
         # get ready to search for 1st char
@@ -467,7 +432,7 @@ mp1_ioctl_sync:
         pushl %ecx # caller save arg registers
         pushl %edx
 
-        pushl %ecx
+        pushl %ecx # push args
         pushl mp1_list_head
 
         call mp1_search_list
@@ -492,7 +457,7 @@ mp1_ioctl_sync:
         # get ready for m1_poke for 2nd location
         xor %ecx, %ecx # clear registers for poke
         xor %eax, %eax
-        cmpl $0, STATUS(%esi) 
+        cmpl $0, STATUS(%esi) # check status
         je STATUS_OFF_SYNC 
         movb ON_CHAR(%esi), %cl # on char for poke
 
@@ -519,7 +484,8 @@ DONE_SYNC:
 
 
 # int mp1_search_list:
-#
+# Looks for a specified location in a given list. Returns the address of the struct 
+# if the desired location is found. Helper function
 # Interface: 
 #        Inputs: unsigned long list to search
 #              : unsigned long location to find
@@ -546,23 +512,20 @@ LOOP_SEARCH_LIST:
 
         # didn't find location
         movl NEXT(%edi), %edi # get the next node
-        cmpl $0, %edi # if next node is null, 
+        cmpl $0, %edi # if next node is null, checking the tail
         je DONE_SEARCH_LIST
         cmpl $0, NEXT(%edi) # if next isn't null
         jne LOOP_SEARCH_LIST # check the next node
 
-LAST_NODE_LIST:
-
-
 DONE_SEARCH_LIST:
         movl  %edi, %eax # load return value 
-        popl  %edi
+        popl  %edi # callee tear down
         popl  %esi
         popl  %ebx
         leave
 	ret
 
-# for ioctl dispatcher
+# functions for ioctl dispatcher
 JUMP_TABLE:             
 .long mp1_ioctl_add, mp1_ioctl_remove, mp1_ioctl_find, mp1_ioctl_sync
 
