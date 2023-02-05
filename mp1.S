@@ -120,7 +120,7 @@ DONE_TASKLET:
 # Interface: 
 #        Inputs: unsigned long arg (left)
 #                unsigned long cmd (right)
-#       Outputs: 0 if succesful, -1 if cmd is not 0-3 or other error
+#       Outputs: -1 if cmd is not 0-3 or other error
 #     Registers: %ebx -  arg
 #                %ecx - cmd
 #                %eax - return value
