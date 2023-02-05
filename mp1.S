@@ -347,10 +347,11 @@ DONE_REMOVE:
 # Interface: 
 #        Inputs: unsigned long arg
 #       Outputs: 0 is succesful, -1 if error
-#     Registers: %ebx - arg pointer to original struct
+#     Registers: %ebx - arg pointer to original struct in user space
 #                %ecx - location to find 
 #                %eax - return value, location of new struct
 #                %edi - address of new struct
+#                %esi - address of original struct in kernel space
 mp1_ioctl_find:
         pushl %ebp
         movl  %esp, %ebp
@@ -361,9 +362,43 @@ mp1_ioctl_find:
         movl 8(%ebp), %ebx # load arg
         cmpl $0, %ebx 
         je ERROR_FIND # invalid structure input
-        xor %ecx, %ecx
-        movw LOCATION(%ebx), %cx # location to find in cx
+        
 
+        # malloc 
+      #  pushl $STRUCT_SIZE # load size to push as argument
+    #    call mp1_malloc # check %eax return value for error
+      #  addl $4, %esp # pop arg off stack
+     #   cmpl $0, %eax
+     #   je ERROR_FIND # error, malloc returned NULL 
+    #    movl %eax, %esi # esi = address of new struct
+
+        # copy_from_user
+    #    pushl $STRUCT_SIZE # size
+     #   pushl %ebx # from
+     #   pushl %esi # to
+
+      #  call mp1_copy_from_user
+       # addl $12, %esp
+       # cmpl $0, %eax 
+     #   jne COPY_FROM_USER_ERROR_FIND # error, not all bytes copied
+
+        # check location
+        xorl %ecx, %ecx
+       # movw LOCATION(%esi), %cx # location to find in cx
+       movw LOCATION(%ebx), %cx
+        # free the memory now that we have the location
+        # pushl %esi
+       # call mp1_free
+      #  addl $4, %esp
+      #  jmp NO_ERROR_CONTINUE_FIND
+
+COPY_FROM_USER_ERROR_FIND:
+     #   pushl %esi
+      #  call mp1_free
+      #  addl $4, %esp
+      #  jmp DONE_FIND
+
+NO_ERROR_CONTINUE_FIND:
         pushl %ecx # push the location to find
         pushl %ebx # pushl the list to search
 
@@ -372,7 +407,7 @@ mp1_ioctl_find:
         popl %ecx 
         cmpl $0, %eax
         je ERROR_FIND # didn't find in list
-
+        movl %eax, %edi
         # found in list
         pushl $STRUCT_SIZE # size
         pushl %edi # from
@@ -514,14 +549,19 @@ mp1_search_list:
 
 LOOP_SEARCH_LIST:
         # check location of current node
-        movw LOCATION(%edi), %ax
-        cmpw %ax, %cx 
+        movw LOCATION(%edi), %ax # get location of current node
+        cmpw %ax, %cx  # if it's equal to target, done
         je DONE_SEARCH_LIST
 
         # didn't find location
-        movl NEXT(%edi), %edi
-        cmpl $0, NEXT(%edi) 
+        movl NEXT(%edi), %edi # get the next node
+        cmpl $0, %edi # if next node is null, 
+        je DONE_SEARCH_LIST
+        cmpl $0, NEXT(%edi) # if next isn't null
         jne LOOP_SEARCH_LIST # check the next node
+
+LAST_NODE_LIST:
+
 
 DONE_SEARCH_LIST:
         movl  %edi, %eax # load return value 
