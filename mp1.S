@@ -123,7 +123,7 @@ DONE_TASKLET:
 #       Outputs: 0 if succesful, -1 if cmd is not 0-3 or other error
 #     Registers: %ebx -  arg
 #                %ecx - cmd
-#       
+#                %eax - return value
 mp1_ioctl:
 
         movl 4(%esp), %ebx # load arg
