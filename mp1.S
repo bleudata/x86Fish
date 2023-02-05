@@ -365,45 +365,32 @@ mp1_ioctl_find:
         
 
         # malloc 
-      #  pushl $STRUCT_SIZE # load size to push as argument
-    #    call mp1_malloc # check %eax return value for error
-      #  addl $4, %esp # pop arg off stack
-     #   cmpl $0, %eax
-     #   je ERROR_FIND # error, malloc returned NULL 
-    #    movl %eax, %esi # esi = address of new struct
+        pushl $STRUCT_SIZE # load size to push as argument
+        call mp1_malloc # check %eax return value for error
+        addl $4, %esp # pop arg off stack
+        cmpl $0, %eax
+        je ERROR_FIND # error, malloc returned NULL 
+        movl %eax, %esi # esi = address of new struct
 
         # copy_from_user
-    #    pushl $STRUCT_SIZE # size
-     #   pushl %ebx # from
-     #   pushl %esi # to
+        pushl $STRUCT_SIZE # size
+        pushl %ebx # from
+        pushl %esi # to
 
-      #  call mp1_copy_from_user
-       # addl $12, %esp
-       # cmpl $0, %eax 
-     #   jne COPY_FROM_USER_ERROR_FIND # error, not all bytes copied
+        call mp1_copy_from_user
+        addl $12, %esp
+        cmpl $0, %eax 
+        jne ERROR_FIND # error, not all bytes copied
 
-        # check location
+        # get location
         xorl %ecx, %ecx
-       # movw LOCATION(%esi), %cx # location to find in cx
-       movw LOCATION(%ebx), %cx
-        # free the memory now that we have the location
-        # pushl %esi
-       # call mp1_free
-      #  addl $4, %esp
-      #  jmp NO_ERROR_CONTINUE_FIND
-
-COPY_FROM_USER_ERROR_FIND:
-     #   pushl %esi
-      #  call mp1_free
-      #  addl $4, %esp
-      #  jmp DONE_FIND
-
-NO_ERROR_CONTINUE_FIND:
+        movw LOCATION(%esi), %cx # location to find in cx
+ 
         pushl %ecx # push the location to find
-        pushl %ebx # pushl the list to search
+        pushl %esi # pushl the list to search
 
         call mp1_search_list
-        popl %ebx # pop args off
+        popl %esi # pop args off
         popl %ecx 
         cmpl $0, %eax
         je ERROR_FIND # didn't find in list
@@ -425,6 +412,10 @@ SUCCESS_FIND:
 ERROR_FIND:
         movl $-1, %eax
 DONE_FIND:
+        # free the original struct from kernel space
+        pushl %esi
+        call mp1_free
+        addl $4, %esp
         popl  %edi
         popl  %esi
         popl  %ebx
